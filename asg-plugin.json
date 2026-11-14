@@ -1,0 +1,9 @@
+{
+  "id": "cnki",
+  "name": "CNKI",
+  "version": "0.1.0",
+  "api_version": 1,
+  "provides": ["fetch"],
+  "entry": "index.mjs",
+  "description": "知网（CNKI）取件插件：机构 IP 登录、摘要页解析与 PDF 下载"
+}

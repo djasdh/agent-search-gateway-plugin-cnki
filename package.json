@@ -1,0 +1,19 @@
+{
+  "name": "agent-search-gateway-plugin-cnki",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "asg 取件插件：CNKI（知网）PDF 下载",
+  "license": "MIT",
+  "scripts": {
+    "build": "node esbuild.config.mjs",
+    "test": "npm run build && vitest run && node --test test/build.test.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}
