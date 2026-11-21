@@ -7,8 +7,10 @@
 import type { ChannelContext, FetchChannel } from "./channels.js";
 
 export interface FetchPluginContext extends ChannelContext {
-  /** 外部插件的自定义配置（内置插件通常不用）。 */
-  pluginConfig?: unknown;
+  /** V2 宿主注入的插件私有配置（`extensions.<id>.config`）。 */
+  pluginConfig?: Readonly<Record<string, unknown>>;
+  /** V2 宿主注入的插件密钥（`extensions.<id>.*` 中已解析的值）。 */
+  pluginSecrets?: Record<string, string>;
 }
 
 export interface FetchPluginResult {

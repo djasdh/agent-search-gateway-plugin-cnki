@@ -1,0 +1,36 @@
+{
+  "id": "cnki",
+  "name": "CNKI",
+  "version": "0.2.0",
+  "api_version": 2,
+  "description": "知网（CNKI）取件插件：机构 IP 登录、摘要页解析与 PDF 下载",
+  "provides": ["fetch"],
+  "entry": "index.mjs",
+  "fetch_channels": [
+    {
+      "id": "cnki:http",
+      "name": "CNKI HTTP",
+      "kind": "http",
+      "capabilities": ["pdf"],
+      "aliases": ["cnki"]
+    }
+  ],
+  "config_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "timeout_ms": {
+        "type": "integer",
+        "default": 15000,
+        "minimum": 1,
+        "description": "单次请求超时"
+      },
+      "max_download_bytes": {
+        "type": "integer",
+        "default": 1073741824,
+        "minimum": 1,
+        "description": "单次下载上限"
+      }
+    }
+  }
+}

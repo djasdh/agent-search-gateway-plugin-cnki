@@ -14,7 +14,6 @@
  *   `%PDF` 魔数判定产物，不能只看状态码或 Content-Type。
  */
 import { createHash } from "node:crypto";
-import type { FetchSettings } from "./sdk/settings.js";
 import type { Logger } from "./sdk/logger.js";
 import { CNKI_HTTP } from "./sdk/channels.js";
 import type { FetchPlugin, FetchPluginContext, FetchPluginResult } from "./sdk/fetch-plugin.js";
@@ -40,8 +39,44 @@ export const policy = {
   cnkiHostSuffix: "cnki.net",
 };
 
-/** 下载允许更慢（实测 3MB 文件）；其余请求用网关的 fetch 超时。 */
+/** 下载允许更慢（实测 3MB 文件）；其余请求用有效超时设置。 */
 const DOWNLOAD_MIN_TIMEOUT_MS = 60_000;
+
+/** 旧宿主缺字段时的兜底值，与 manifest config_schema 的默认值一致。 */
+export const DEFAULT_TIMEOUT_MS = 15_000;
+export const DEFAULT_MAX_DOWNLOAD_BYTES = 1024 * 1024 * 1024;
+
+export interface EffectiveFetchLimits {
+  timeoutMs: number;
+  maxDownloadBytes: number;
+}
+
+/** 只接受正整数；其余（0、负数、小数、字符串、NaN）返回 undefined。 */
+function positiveInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
+/**
+ * 计算本次取件的有效限制。
+ *
+ * - V2 宿主：`ctx.pluginConfig`（`extensions.cnki.config`）优先；
+ * - V1 宿主 / 未配置字段：回退旧的通用 `ctx.settings.fetch`；
+ * - 两边都缺失时用 15000 / 1 GiB。
+ */
+export function resolveFetchLimits(ctx: FetchPluginContext): EffectiveFetchLimits {
+  const legacy = ctx.settings?.fetch;
+  const config = ctx.pluginConfig;
+  return {
+    timeoutMs:
+      positiveInteger(config?.timeout_ms) ??
+      positiveInteger(legacy?.timeout_ms) ??
+      DEFAULT_TIMEOUT_MS,
+    maxDownloadBytes:
+      positiveInteger(config?.max_download_bytes) ??
+      positiveInteger(legacy?.max_download_bytes) ??
+      DEFAULT_MAX_DOWNLOAD_BYTES,
+  };
+}
 
 const NOT_SUBSCRIBED_MARKERS = ["未订购", "会员中心", "订购该资源", "尚未订购"];
 const NO_PDF_MARKERS = ["htmlread", "htmlread.html"];
@@ -144,10 +179,10 @@ async function readLimited(
 /** 零凭据 IP 登录；成功返回会话 cookie，失败返回 undefined。 */
 async function openSession(
   jar: CookieJar,
-  fetchSettings: FetchSettings,
+  timeoutMs: number,
   logger?: Logger,
 ): Promise<boolean> {
-  const timeout = Math.max(fetchSettings.timeout_ms, 10_000);
+  const timeout = Math.max(timeoutMs, 10_000);
   try {
     const res = await cnkiFetch(endpoints.clientId, jar, timeout);
     jar.store(res);
@@ -198,11 +233,11 @@ function classifyNonPdf(bytes: Buffer, finalUrl: string): { errorCode: string; e
 }
 
 async function fetchCnki(url: URL, ctx: FetchPluginContext): Promise<FetchPluginResult> {
-  const { settings, logger } = ctx;
-  const fetchSettings = settings.fetch;
+  const { logger } = ctx;
+  const { timeoutMs, maxDownloadBytes } = resolveFetchLimits(ctx);
   const jar = new CookieJar();
 
-  if (!(await openSession(jar, fetchSettings, logger))) {
+  if (!(await openSession(jar, timeoutMs, logger))) {
     return {
       ok: false,
       finalUrl: url.toString(),
@@ -214,7 +249,7 @@ async function fetchCnki(url: URL, ctx: FetchPluginContext): Promise<FetchPlugin
   // 摘要页 → 先取出下载链接（实测 #pdfDown / #cajDown → bar/download/order?id=…）
   let target = url.toString();
   if (url.pathname.includes(ABSTRACT_PATH)) {
-    const page = await cnkiFetch(target, jar, fetchSettings.timeout_ms);
+    const page = await cnkiFetch(target, jar, timeoutMs);
     const html = await page.text();
     const href = extractAnchorHref(html, "pdfDown") ?? extractAnchorHref(html, "cajDown");
     if (!href) {
@@ -236,15 +271,15 @@ async function fetchCnki(url: URL, ctx: FetchPluginContext): Promise<FetchPlugin
     return { ok: false, finalUrl: target, errorCode: "BAD_TARGET", errorMessage: `非知网下载地址：${targetUrl.hostname}` };
   }
 
-  const res = await cnkiFetch(target, jar, Math.max(fetchSettings.timeout_ms, DOWNLOAD_MIN_TIMEOUT_MS));
-  const { bytes, tooLarge } = await readLimited(res, fetchSettings.max_download_bytes);
+  const res = await cnkiFetch(target, jar, Math.max(timeoutMs, DOWNLOAD_MIN_TIMEOUT_MS));
+  const { bytes, tooLarge } = await readLimited(res, maxDownloadBytes);
   if (tooLarge) {
     return {
       ok: false,
       status: res.status,
       finalUrl: res.url,
       errorCode: "TOO_LARGE",
-      errorMessage: `文件超过 ${fetchSettings.max_download_bytes} 字节上限（fetch.max_download_bytes）`,
+      errorMessage: `文件超过 ${maxDownloadBytes} 字节上限（extensions.cnki.config.max_download_bytes）`,
     };
   }
   if (bytes.byteLength === 0) {

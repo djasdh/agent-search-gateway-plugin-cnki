@@ -2,7 +2,7 @@ import { createServer as createHttpServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { fetch as plugin } from "../src/index.js";
-import { endpoints, policy } from "../src/plugin.js";
+import { DEFAULT_MAX_DOWNLOAD_BYTES, DEFAULT_TIMEOUT_MS, endpoints, policy, resolveFetchLimits } from "../src/plugin.js";
 import type { FetchPluginContext } from "../src/sdk/fetch-plugin.js";
 import type { FetchSettings } from "../src/sdk/settings.js";
 
@@ -13,7 +13,10 @@ const silentLogger = {
   error: () => {},
 };
 
-function pluginCtx(overrides: Partial<FetchSettings> = {}): FetchPluginContext {
+function pluginCtx(
+  overrides: Partial<FetchSettings> = {},
+  pluginConfig?: Readonly<Record<string, unknown>>,
+): FetchPluginContext {
   return {
     settings: {
       fetch: {
@@ -27,6 +30,7 @@ function pluginCtx(overrides: Partial<FetchSettings> = {}): FetchPluginContext {
     secrets: { bilibili: { http: { token: "" } } },
     getSecret: () => undefined,
     logger: silentLogger,
+    ...(pluginConfig === undefined ? {} : { pluginConfig }),
   };
 }
 
@@ -130,6 +134,55 @@ describe("match", () => {
   });
 });
 
+describe("有效设置", () => {
+  it("只有旧 settings.fetch 时行为不变", () => {
+    expect(resolveFetchLimits(pluginCtx())).toEqual({
+      timeoutMs: 4000,
+      maxDownloadBytes: 4 * 1024 * 1024,
+    });
+  });
+
+  it("pluginConfig 同时覆盖 timeout_ms 与 max_download_bytes", () => {
+    expect(
+      resolveFetchLimits(pluginCtx({}, { timeout_ms: 12000, max_download_bytes: 2048 })),
+    ).toEqual({ timeoutMs: 12000, maxDownloadBytes: 2048 });
+  });
+
+  it("pluginConfig 缺字段时回退旧值", () => {
+    expect(resolveFetchLimits(pluginCtx({}, { timeout_ms: 9000 }))).toEqual({
+      timeoutMs: 9000,
+      maxDownloadBytes: 4 * 1024 * 1024,
+    });
+    expect(resolveFetchLimits(pluginCtx({}, { max_download_bytes: 1234 }))).toEqual({
+      timeoutMs: 4000,
+      maxDownloadBytes: 1234,
+    });
+  });
+
+  it("pluginConfig 非法值被忽略", () => {
+    expect(
+      resolveFetchLimits(pluginCtx({}, { timeout_ms: 0, max_download_bytes: -1 })),
+    ).toEqual({ timeoutMs: 4000, maxDownloadBytes: 4 * 1024 * 1024 });
+    expect(
+      resolveFetchLimits(pluginCtx({}, { timeout_ms: 1.5, max_download_bytes: "2048" })),
+    ).toEqual({ timeoutMs: 4000, maxDownloadBytes: 4 * 1024 * 1024 });
+  });
+
+  it("两边都缺字段时用默认值", () => {
+    const ctx = {
+      settings: { fetch: {} },
+      secrets: { bilibili: { http: { token: "" } } },
+      getSecret: () => undefined,
+      logger: silentLogger,
+      pluginConfig: {},
+    } as unknown as FetchPluginContext;
+    expect(resolveFetchLimits(ctx)).toEqual({
+      timeoutMs: DEFAULT_TIMEOUT_MS,
+      maxDownloadBytes: DEFAULT_MAX_DOWNLOAD_BYTES,
+    });
+  });
+});
+
 describe("fetch", () => {
   it("摘要页 → #pdfDown → 跟随重定向拿到 %PDF", async () => {
     const r = await plugin.fetch(new URL(`${base}/kcms2/article/abstract?v=abc`), pluginCtx());
@@ -174,6 +227,18 @@ describe("fetch", () => {
     );
     expect(r.ok).toBe(false);
     expect(r.errorCode).toBe("TOO_LARGE");
+  });
+
+  it("pluginConfig.max_download_bytes 覆盖旧上限（错误文本用有效值）", async () => {
+    behaviour = "huge";
+    const r = await plugin.fetch(
+      new URL(`${base}/bar/download/order?id=pdf`),
+      pluginCtx({ max_download_bytes: 4 * 1024 * 1024 }, { max_download_bytes: 1024 }),
+    );
+    expect(r.ok).toBe(false);
+    expect(r.errorCode).toBe("TOO_LARGE");
+    expect(r.errorMessage).toContain("1024");
+    expect(r.errorMessage).toContain("extensions.cnki.config.max_download_bytes");
   });
 
   it("摘要页指向站外地址 → BAD_TARGET（不跟随到非知网域名）", async () => {

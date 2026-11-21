@@ -9,9 +9,12 @@
 ## 安装
 
 ```bash
-asg extensions install djasdh/agent-search-gateway-plugin-cnki@0.1.0
+asg extensions install djasdh/agent-search-gateway-plugin-cnki@0.2.0
 asg extensions list
 ```
+
+> 0.2.0 同时带 `asg-extension.json`（V2）与 `asg-plugin.json`（V1）：
+> 0.3.9 及以上优先使用 V2 manifest，0.3.8 及更早继续读 V1 manifest。
 
 ## 能力
 
@@ -28,17 +31,44 @@ asg extensions list
 1. `GenerateClientID` 拿 clientId → md5 签名 → `IpLoginFlushPo` 拿 `LID`（下载必需）；
 2. 会话每次现开，插件自管 cookie，不跨请求持久化；
 3. 按 `%PDF` 魔数判定产物（部分文献只有 HTML 阅读版）；
-4. 下载大小受 `fetch.max_download_bytes` 限制，超限立即中止。
+4. 下载大小受 `max_download_bytes` 限制，超限立即中止。
 
 错误码：`CNKI_NO_SESSION`、`NOT_SUBSCRIBED`、`NO_PDF`、`NOT_PDF`、`TOO_LARGE`、`EMPTY`、`BAD_TARGET`、`NO_DOWNLOAD_LINK`。
 
 ## 配置
 
+网关 0.3.9+ 使用插件私有配置（V2）：
+
+```bash
+asg extensions config cnki --set timeout_ms=15000
+asg extensions config cnki --set max_download_bytes=1073741824
+```
+
+对应 `gateway.yaml`：
+
+```yaml
+extensions:
+  cnki:
+    config:
+      timeout_ms: 15000
+      max_download_bytes: 1073741824   # 1 GiB
+```
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `timeout_ms` | `15000` | 单次请求超时（登录/摘要页/下载） |
+| `max_download_bytes` | `1073741824` | 单次下载上限 |
+
+旧版网关（0.3.8 及更早）继续读取通用 `fetch.*`：
+
 ```yaml
 fetch:
   timeout_ms: 15000
-  max_download_bytes: 1073741824   # 1 GiB
+  max_download_bytes: 1073741824
 ```
+
+插件优先使用 `extensions.cnki.config`；字段缺失时回退旧 `fetch.*`，
+两边都没有时用默认值（15000 / 1 GiB）。
 
 需要在机构网段（或机构 VPN）内访问；否则 IP 登录拿不到 `LID`，会明确返回 `CNKI_NO_SESSION`。
 
@@ -60,10 +90,11 @@ npm run typecheck  # tsc --noEmit
 
 ## 发版
 
-1. 同步修改 `asg-plugin.json` 与 `package.json` 的版本号。
-2. `git tag v0.1.0 && git push origin v0.1.0`。
+1. 同步修改 `asg-extension.json`、`asg-plugin.json` 与 `package.json` 的版本号。
+2. `git tag v0.2.0 && git push origin v0.2.0`。
 3. GitHub Actions 执行 `npm ci` / `npm run typecheck` / `npm test` / `npm run build`，
-   生成 `SHA256SUMS` 并创建 Release（`index.mjs`、`asg-plugin.json`、`SHA256SUMS`）。
+   生成 `SHA256SUMS` 并创建 Release（`index.mjs`、`asg-extension.json`、
+   `asg-plugin.json`、`SHA256SUMS`）。
 
 ## 发现
 

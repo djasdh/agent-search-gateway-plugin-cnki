@@ -1,6 +1,6 @@
 {
   "name": "agent-search-gateway-plugin-cnki",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "asg 取件插件：CNKI（知网）PDF 下载",
